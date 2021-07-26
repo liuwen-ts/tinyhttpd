@@ -37,18 +37,18 @@
 
 #define SERVER_STRING "Server: jdbhttpd/0.1.0\r\n"
 
-void accept_request(int);
-void bad_request(int);
-void cat(int, FILE *);
-void cannot_execute(int);
-void error_die(const char *);
-void execute_cgi(int, const char *, const char *, const char *);
-int get_line(int, char *, int);
-void headers(int, const char *);
-void not_found(int);
-void serve_file(int, const char *);
-int startup(u_short *);
-void unimplemented(int);
+void accept_request(int);//处理链接，子线程
+void bad_request(int);//400错误
+void cat(int, FILE *);//处理文件，读取文件内容发送到客户端
+void cannot_execute(int);//500错误处理函数
+void error_die(const char *);//错误处理函数处理
+void execute_cgi(int, const char *, const char *, const char *);//cgi调用函数
+int get_line(int, char *, int);//从缓冲区读取一行
+void headers(int, const char *);//服务器成功响应返回200
+void not_found(int);//请求的内容不存在404
+void serve_file(int, const char *);//处理文件请求，调用cat
+int startup(u_short *);//初始化服务器
+void unimplemented(int);//501仅实现了get post方法，其他方法错误处理函数
 
 /**********************************************************************/
 /* A request has caused a call to accept() on the server port to
@@ -500,45 +500,45 @@ void serve_file(int client, const char *filename)
 /**********************************************************************/
 int startup(u_short *port)
 {
- int httpd = 0;
+ int httpd = 0;//定义服务器socket描述符
  //sockaddr_in 是 IPV4的套接字地址结构。定义在<netinet/in.h>,参读《TLPI》P1202
- struct sockaddr_in name;
- 
+ struct sockaddr_in name;//定义sockaddr_in型结构体用来绑定服务器端的ip地址和端口
+ //创建服务器端socket PF_INET 地址类型ipv4，SOCK_STREAM socket的类型，0前面类型参数的默认协议
  //socket()用于创建一个用于 socket 的描述符，函数包含于<sys/socket.h>。参读《TLPI》P1153
  //这里的PF_INET其实是与 AF_INET同义，具体可以参读《TLPI》P946
  httpd = socket(PF_INET, SOCK_STREAM, 0);
- if (httpd == -1)
+ if (httpd == -1)//错误判断
   error_die("socket");
   
- memset(&name, 0, sizeof(name));
- name.sin_family = AF_INET;
+ memset(&name, 0, sizeof(name));//name的每个字节都被填充成字符0
+ name.sin_family = AF_INET;//地址类型ipv4
  //htons()，ntohs() 和 htonl()包含于<arpa/inet.h>, 参读《TLPI》P1199
  //将*port 转换成以网络字节序表示的16位整数
- name.sin_port = htons(*port);
+ name.sin_port = htons(*port);//端口转换成网络字节序（大端存储）
  //INADDR_ANY是一个 IPV4通配地址的常量，包含于<netinet/in.h>
  //大多实现都将其定义成了0.0.0.0 参读《TLPI》P1187
- name.sin_addr.s_addr = htonl(INADDR_ANY);
+ name.sin_addr.s_addr = htonl(INADDR_ANY);//本机任一可用ip地址
  
  //bind()用于绑定地址与 socket。参读《TLPI》P1153
  //如果传进去的sockaddr结构中的 sin_port 指定为0，这时系统会选择一个临时的端口号
- if (bind(httpd, (struct sockaddr *)&name, sizeof(name)) < 0)
+ if (bind(httpd, (struct sockaddr *)&name, sizeof(name)) < 0) //将服务器的socket绑定到地址上
   error_die("bind");
   
  //如果调用 bind 后端口号仍然是0，则手动调用getsockname()获取端口号
- if (*port == 0)  /* if dynamically allocating a port */
+ if (*port == 0)  /* if dynamically allocating a port */  //如果传递的端口号为0，则随机选取一个可用端口
  {
   int namelen = sizeof(name);
   //getsockname()包含于<sys/socker.h>中，参读《TLPI》P1263
   //调用getsockname()获取系统给 httpd 这个 socket 随机分配的端口号
   if (getsockname(httpd, (struct sockaddr *)&name, &namelen) == -1)
    error_die("getsockname");
-  *port = ntohs(name.sin_port);
+  *port = ntohs(name.sin_port);//将网络字节序转换成本地的
  }
  
  //最初的 BSD socket 实现中，backlog 的上限是5.参读《TLPI》P1156
- if (listen(httpd, 5) < 0) 
+ if (listen(httpd, 5) < 0) //服务器开始监听
   error_die("listen");
- return(httpd);
+ return(httpd); //返回服务器socket描述符
 }
 
 /**********************************************************************/
@@ -572,23 +572,24 @@ void unimplemented(int client)
 
 int main(void)
 {
- int server_sock = -1;
- u_short port = 0;
- int client_sock = -1;
+ int server_sock = -1;//定义服务器socket描述符
+ u_short port = 0;//定义服务器监听端口
+ int client_sock = -1;//定义客户端socket描述符
  //sockaddr_in 是 IPV4的套接字地址结构。定义在<netinet/in.h>,参读《TLPI》P1202
- struct sockaddr_in client_name;
- int client_name_len = sizeof(client_name);
- //pthread_t newthread;
+ struct sockaddr_in client_name;//定义sockaddr——in 型结构体，accept
+ int client_name_len = sizeof(client_name);//获取客户端地址长度
+ //pthread_t newthread; //定义线程id
 
- server_sock = startup(&port);
- printf("httpd running on port %d\n", port);
+ server_sock = startup(&port); //初始化服务器
+ printf("httpd running on port %d\n", port);//打印端口号
 
+ //循环创建链接和子线程
  while (1)
  {
   //阻塞等待客户端的连接，参读《TLPI》P1157
   client_sock = accept(server_sock,
                        (struct sockaddr *)&client_name,
-                       &client_name_len);
+                       &client_name_len);//阻塞等待客户端建立链接
   if (client_sock == -1)
    error_die("accept");
   accept_request(client_sock);
